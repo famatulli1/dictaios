@@ -9,12 +9,28 @@ struct PlayerView: View {
     
     var body: some View {
         VStack(spacing: 8) {
-            // Playback progress bar
+            // Waveform visualization
             if recording.isPlaying {
                 VStack(spacing: 4) {
-                    ProgressView(value: viewModel.playbackProgress)
-                        .progressViewStyle(LinearProgressViewStyle())
-                        .tint(Color.blue)
+                    if let samples = viewModel.audioSamples[recording.fileURL] {
+                        // Show waveform if samples are available
+                        WaveformView(
+                            samples: samples,
+                            progress: viewModel.playbackProgress,
+                            playingColor: .blue,
+                            notPlayingColor: Color.gray.opacity(0.5)
+                        )
+                        .frame(height: 40)
+                    } else if viewModel.isLoadingWaveform {
+                        // Show loading animation while samples are being loaded
+                        WaveformLoadingView()
+                            .frame(height: 40)
+                    } else {
+                        // Fallback to simple progress bar if waveform can't be loaded
+                        ProgressView(value: viewModel.playbackProgress)
+                            .progressViewStyle(LinearProgressViewStyle())
+                            .tint(Color.blue)
+                    }
                     
                     // Time indicators
                     HStack {
@@ -31,6 +47,12 @@ struct PlayerView: View {
                 }
                 .padding(.horizontal)
                 .transition(.opacity)
+                .onAppear {
+                    // Load waveform data when the player appears
+                    Task {
+                        await viewModel.loadWaveformData(for: recording)
+                    }
+                }
             }
             
             // Recording info and controls

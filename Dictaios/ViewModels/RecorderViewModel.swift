@@ -18,6 +18,8 @@ class RecorderViewModel: NSObject, ObservableObject {
     @Published var selectedRecording: AudioRecording?
     @Published var playbackProgress: Double = 0
     @Published var errorMessage: String?
+    @Published var audioSamples: [URL: [Float]] = [:]
+    @Published var isLoadingWaveform: Bool = false
     
     // Audio components
     private var audioRecorder: AVAudioRecorder?
@@ -33,6 +35,11 @@ class RecorderViewModel: NSObject, ObservableObject {
         super.init()
         loadRecordings()
         setupAudioSession()
+        
+        // Preload waveforms for existing recordings
+        Task {
+            await preloadAllWaveforms()
+        }
     }
     
     // MARK: - Setup
@@ -191,6 +198,49 @@ class RecorderViewModel: NSObject, ObservableObject {
     
     func loadRecordings() {
         recordings = fileManager.getAllRecordings()
+        
+        // Preload waveforms for newly loaded recordings
+        Task {
+            await preloadAllWaveforms()
+        }
+    }
+    
+    // MARK: - Waveform Functions
+    
+    // Load waveform data for a specific recording
+    func loadWaveformData(for recording: AudioRecording) async {
+        // Skip if already loaded
+        if audioSamples[recording.fileURL] != nil {
+            return
+        }
+        
+        // Update loading state on main thread
+        await MainActor.run {
+            isLoadingWaveform = true
+        }
+        
+        do {
+            let samples = try await AudioAnalyzer.shared.extractSamples(from: recording.fileURL, samplesCount: 100)
+            
+            // Update on main thread
+            await MainActor.run {
+                audioSamples[recording.fileURL] = samples
+                isLoadingWaveform = false
+            }
+        } catch {
+            print("Error loading waveform: \(error.localizedDescription)")
+            
+            await MainActor.run {
+                isLoadingWaveform = false
+            }
+        }
+    }
+    
+    // Preload waveforms for all recordings
+    func preloadAllWaveforms() async {
+        for recording in recordings {
+            await loadWaveformData(for: recording)
+        }
     }
     
     func deleteRecording(_ recording: AudioRecording) {

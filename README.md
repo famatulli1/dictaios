@@ -15,6 +15,7 @@ Une application SwiftUI pour enregistrer, sauvegarder et lire des notes vocales 
 - Enregistrement audio avec AVAudioRecorder
 - Sauvegarde des fichiers au format .m4a dans le répertoire Documents
 - Liste des enregistrements avec date et durée
+- Visualisation de forme d'onde (waveform) précise basée sur les données audio réelles
 - Lecture des enregistrements avec contrôles et barre de progression
 - Suppression des enregistrements par swipe ou menu contextuel
 - Interface utilisateur épurée et responsive
@@ -24,12 +25,14 @@ Une application SwiftUI pour enregistrer, sauvegarder et lire des notes vocales 
 - **Models/**
   - `AudioRecording.swift` - Modèle représentant un enregistrement audio
   - `AudioFileManager.swift` - Gestion des fichiers audio
+  - `AudioAnalyzer.swift` - Extraction et analyse des données audio pour la visualisation
 - **ViewModels/**
   - `RecorderViewModel.swift` - Logique d'enregistrement et de lecture
 - **Views/**
   - `MainView.swift` - Interface principale
   - `RecordButton.swift` - Bouton d'enregistrement personnalisé
   - `PlayerView.swift` - Interface de lecture des enregistrements
+  - `WaveformView.swift` - Visualisation de la forme d'onde audio
 
 ## Prérequis
 
