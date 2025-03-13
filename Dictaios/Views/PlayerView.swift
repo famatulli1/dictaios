@@ -6,6 +6,7 @@ struct PlayerView: View {
     let onStop: () -> Void
     
     @ObservedObject var viewModel: RecorderViewModel
+    @State private var showTranscription = false
     
     var body: some View {
         VStack(spacing: 8) {
@@ -58,14 +59,69 @@ struct PlayerView: View {
             // Recording info and controls
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(recording.fileName)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                    
-                    Text(recording.formattedDate)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        HStack(spacing: 4) {
+                            Image(systemName: "text.bubble.fill")
+                                .foregroundColor(.blue)
+                                .opacity(recording.transcription != nil ? 1 : 0)
+                            Text(recording.fileName)
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .lineLimit(1)
+                        }
+                        
+                        if let transcription = recording.transcription {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text("Transcription:")
+                                        .font(.caption)
+                                        .foregroundColor(.blue)
+                                    
+                                    Spacer()
+                                    
+                                    Button(action: {
+                                        Task {
+                                            do {
+                                                try await TranscriptionManager.shared.setTranscription(transcription, for: recording.recordingID)
+                                                viewModel.errorMessage = "Transcription sauvegardée"
+                                            } catch {
+                                                viewModel.errorMessage = "Erreur lors de la sauvegarde: \(error.localizedDescription)"
+                                            }
+                                        }
+                                    }) {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "square.and.arrow.down")
+                                            Text("Sauvegarder")
+                                        }
+                                        .font(.caption)
+                                        .foregroundColor(.blue)
+                                    }
+                                }
+                                
+                                Text(transcription)
+                                    .font(.body)
+                                    .foregroundColor(.primary)
+                                    .padding(.vertical, 4)
+                                    .lineLimit(showTranscription ? nil : 2)
+                                    .onTapGesture {
+                                        withAnimation {
+                                            showTranscription.toggle()
+                                        }
+                                    }
+                            }
+                        } else if viewModel.isTranscribing(recording) {
+                            HStack(spacing: 4) {
+                                Text("Transcription en cours...")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        
+                        Text(recording.formattedDate)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                 }
                 
                 Spacer()
@@ -78,20 +134,58 @@ struct PlayerView: View {
                         .padding(.trailing, 8)
                 }
                 
-                // Play/Stop button
-                Button(action: {
-                    if recording.isPlaying {
-                        onStop()
-                    } else {
-                        onPlay(recording)
+                HStack(spacing: 8) {
+                    // Play/Stop button
+                    Button(action: {
+                        if recording.isPlaying {
+                            onStop()
+                        } else {
+                            onPlay(recording)
+                        }
+                    }) {
+                        Image(systemName: recording.isPlaying ? "stop.fill" : "play.fill")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 30, height: 30)
+                            .background(recording.isPlaying ? Color.red : Color.blue)
+                            .clipShape(Circle())
                     }
-                }) {
-                    Image(systemName: recording.isPlaying ? "stop.fill" : "play.fill")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.white)
-                        .frame(width: 30, height: 30)
-                        .background(recording.isPlaying ? Color.red : Color.blue)
-                        .clipShape(Circle())
+                    
+                    // Transcription button
+                    if AppSettings.shared.isVoiceRecognitionEnabled {
+                        if !AppSettings.shared.isAPIKeyValid {
+                            Button(action: {}) {
+                                Image(systemName: "text.bubble")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 30, height: 30)
+                                    .background(Color.orange)
+                                    .clipShape(Circle())
+                            }
+                            .disabled(true)
+                            .help("Clé API OpenAI invalide ou manquante dans les paramètres")
+                        } else {
+                            Button(action: {
+                                viewModel.transcribeRecording(at: recording.fileURL)
+                            }) {
+                                Image(systemName: viewModel.isTranscribing(recording) ? "ellipsis" : "text.bubble")
+                                    .font(.system(size: 14, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 30, height: 30)
+                                    .background(viewModel.isTranscribing(recording) ? Color.gray : Color.green)
+                                    .clipShape(Circle())
+                                    .overlay {
+                                        if viewModel.isTranscribing(recording) {
+                                            ProgressView()
+                                                .scaleEffect(0.5)
+                                                .tint(.white)
+                                        }
+                                    }
+                            }
+                            .disabled(viewModel.isTranscribing(recording) || recording.transcription != nil)
+                            .help(recording.transcription != nil ? "Déjà transcrit" : "Transcrire l'enregistrement")
+                        }
+                    }
                 }
             }
             .padding(.horizontal)

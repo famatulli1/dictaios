@@ -13,13 +13,28 @@ class RecorderViewModel: NSObject, ObservableObject {
     
     // Published properties
     @Published var recordings: [AudioRecording] = []
+    @Published private(set) var isTranscribing = false
     @Published var recordingState: RecordingState = .idle
     @Published var currentRecordingTime: TimeInterval = 0
     @Published var selectedRecording: AudioRecording?
     @Published var playbackProgress: Double = 0
-    @Published var errorMessage: String?
+    @Published var errorMessage: String? {
+        didSet {
+            if errorMessage != nil {
+                // Clear success messages after 3 seconds
+                if errorMessage?.hasPrefix("Transcription sauvegardée") == true {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                        if self?.errorMessage?.hasPrefix("Transcription sauvegardée") == true {
+                            self?.errorMessage = nil
+                        }
+                    }
+                }
+            }
+        }
+    }
     @Published var audioSamples: [URL: [Float]] = [:]
     @Published var isLoadingWaveform: Bool = false
+    @Published private var transcribingRecordings: Set<UUID> = []
     
     // Audio components
     private var audioRecorder: AVAudioRecorder?
@@ -115,7 +130,7 @@ class RecorderViewModel: NSObject, ObservableObject {
         // Update state
         recordingState = .idle
         
-        // Add the new recording to the list
+        // Load recordings to show the new recording
         loadRecordings()
     }
     
@@ -199,8 +214,18 @@ class RecorderViewModel: NSObject, ObservableObject {
     func loadRecordings() {
         recordings = fileManager.getAllRecordings()
         
-        // Preload waveforms for newly loaded recordings
+        // Load transcriptions for recordings
         Task {
+            for i in 0..<recordings.count {
+                let recordingID = recordings[i].recordingID
+                if let transcription = await TranscriptionManager.shared.getTranscription(for: recordingID) {
+                    await MainActor.run {
+                        recordings[i].transcription = transcription
+                    }
+                }
+            }
+            
+            // Preload waveforms for newly loaded recordings
             await preloadAllWaveforms()
         }
     }
@@ -243,17 +268,22 @@ class RecorderViewModel: NSObject, ObservableObject {
         }
     }
     
-    func deleteRecording(_ recording: AudioRecording) {
+    func deleteRecording(_ recording: AudioRecording) async {
         // Stop playback if this recording is playing
         if selectedRecording?.id == recording.id {
             stopPlayback()
         }
         
-        // Delete the file
+        // Delete the file and transcription
         if fileManager.deleteRecording(at: recording.fileURL) {
-            // Remove from the list
-            if let index = recordings.firstIndex(where: { $0.id == recording.id }) {
-                recordings.remove(at: index)
+            // Remove transcription
+            await TranscriptionManager.shared.deleteTranscription(for: recording.recordingID)
+            
+            // Remove from the list on main thread
+            await MainActor.run {
+                if let index = recordings.firstIndex(where: { $0.id == recording.id }) {
+                    recordings.remove(at: index)
+                }
             }
         }
     }
@@ -271,6 +301,48 @@ extension RecorderViewModel: AVAudioRecorderDelegate {
         recordingState = .idle
         progressTimer?.invalidate()
         progressTimer = nil
+    }
+    
+    // MARK: - Transcription
+    
+    func transcribeRecording(at url: URL) {
+        guard let recording = recordings.first(where: { $0.fileURL == url }) else { return }
+        
+        // Vérifier d'abord si la clé API est valide
+        guard AppSettings.shared.isAPIKeyValid else {
+            errorMessage = "Veuillez configurer une clé API OpenAI valide dans les paramètres"
+            return
+        }
+        
+        transcribingRecordings.insert(recording.id)
+        
+        Task {
+            do {
+                let transcription = try await VoiceRecognitionService.shared.transcribeAudio(url: url)
+                try await TranscriptionManager.shared.setTranscription(transcription, for: recording.recordingID)
+                
+                await MainActor.run {
+                    if let index = recordings.firstIndex(where: { $0.id == recording.id }) {
+                        recordings[index].transcription = transcription
+                    }
+                    transcribingRecordings.remove(recording.id)
+                }
+            } catch let error as VoiceRecognitionError {
+                await MainActor.run {
+                    transcribingRecordings.remove(recording.id)
+                    errorMessage = error.localizedDescription
+                }
+            } catch {
+                await MainActor.run {
+                    transcribingRecordings.remove(recording.id)
+                    errorMessage = "Erreur inattendue: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+    
+    func isTranscribing(_ recording: AudioRecording) -> Bool {
+        transcribingRecordings.contains(recording.id)
     }
 }
 

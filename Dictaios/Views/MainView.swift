@@ -2,6 +2,26 @@ import SwiftUI
 
 struct MainView: View {
     @StateObject private var viewModel = RecorderViewModel()
+    @StateObject private var settings = AppSettings.shared
+    
+    var body: some View {
+        TabView {
+            RecordingsView(viewModel: viewModel)
+                .tabItem {
+                    Label("Enregistrements", systemImage: "mic")
+                }
+            
+            TranscriptionsView(viewModel: viewModel)
+                .tabItem {
+                    Label("Transcriptions", systemImage: "doc.text")
+                }
+        }
+    }
+}
+
+struct RecordingsView: View {
+    @ObservedObject var viewModel: RecorderViewModel
+    @State private var showingSettings = false
     @State private var showingErrorAlert = false
     
     var body: some View {
@@ -28,7 +48,13 @@ struct MainView: View {
             }
             .navigationTitle("Dictaios")
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        showingSettings = true
+                    }) {
+                        Image(systemName: "gear")
+                    }
+                    
                     Button(action: {
                         viewModel.loadRecordings()
                     }) {
@@ -45,6 +71,9 @@ struct MainView: View {
             }
             .onChange(of: viewModel.errorMessage) { newValue in
                 showingErrorAlert = newValue != nil
+            }
+            .sheet(isPresented: $showingSettings) {
+                SettingsView()
             }
         }
     }
@@ -85,14 +114,18 @@ struct MainView: View {
                     )
                     .swipeActions {
                         Button(role: .destructive) {
-                            viewModel.deleteRecording(recording)
+                            Task {
+                                await viewModel.deleteRecording(recording)
+                            }
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
                     }
                     .contextMenu {
                         Button(role: .destructive) {
-                            viewModel.deleteRecording(recording)
+                            Task {
+                                await viewModel.deleteRecording(recording)
+                            }
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }

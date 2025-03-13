@@ -6,6 +6,11 @@ struct AudioRecording: Identifiable, Equatable {
     let createdAt: Date
     var duration: TimeInterval
     var isPlaying: Bool = false
+    var transcription: String?
+    
+    var recordingID: String {
+        id.uuidString
+    }
     
     var fileName: String {
         fileURL.lastPathComponent
