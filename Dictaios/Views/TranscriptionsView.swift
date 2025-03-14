@@ -1,165 +1,119 @@
 import SwiftUI
 import OSLog
 
-struct TranscriptionRow: View {
-    let recording: AudioRecording
-    let onEdit: () -> Void
-    @State private var showFullText = false
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "doc.text")
-                    .foregroundColor(.blue)
-                Text(recording.fileName)
-                    .font(.headline)
-                    .lineLimit(1)
-                
-                Spacer()
-                
-                Text(recording.formattedDate)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            if let transcription = recording.transcription {
-                Text(transcription)
-                    .font(.body)
-                    .foregroundColor(.primary)
-                    .lineLimit(showFullText ? nil : 3)
-                    .onTapGesture {
-                        withAnimation {
-                            showFullText.toggle()
-                        }
-                    }
-            }
-            
-            if showFullText {
-                Button("Voir moins") {
-                    withAnimation {
-                        showFullText = false
-                    }
-                }
-                .font(.caption)
-                .foregroundColor(.blue)
-            }
-        }
-        .padding()
-        .background(Color(.systemGray6))
-        .contentShape(Rectangle())
-        .cornerRadius(10)
-        .onTapGesture(perform: onEdit)
-    }
-}
-
-struct TranscriptionEditor: View {
-    @Environment(\.dismiss) private var dismiss
-    @Binding var text: String
-    let onSave: () -> Void
-    
-    var body: some View {
-        NavigationView {
-            TextEditor(text: $text)
-                .padding()
-                .navigationTitle("Modifier la transcription")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Enregistrer") {
-                            onSave()
-                            dismiss()
-                        }
-                    }
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Annuler") {
-                            dismiss()
-                        }
-                    }
-                }
-        }
-    }
-}
-
 struct TranscriptionsView: View {
     private let logger = Logger(subsystem: "com.dictaios", category: "TranscriptionsView")
     @ObservedObject var viewModel: RecorderViewModel
     @State private var editingTranscription: AudioRecording?
     @State private var editedText: String = ""
     @State private var isLoading = false
+    @State private var searchText = ""
+    @State private var showSearch = false
+    @State private var selectedFolder: Folder?
+    @State private var showFolderPicker = false
     
     private var transcribedRecordings: [AudioRecording] {
-        // Filter by selected folder if one is selected
         let recordings = viewModel.folderViewModel.selectedFolderId != nil ? 
             viewModel.filteredRecordings : viewModel.recordings
         
-        return recordings.filter { $0.transcription != nil }
+        let filtered = recordings.filter { $0.transcription != nil }
+            .filter {
+                if searchText.isEmpty { return true }
+                return $0.transcription?.localizedCaseInsensitiveContains(searchText) ?? false ||
+                       $0.fileName.localizedCaseInsensitiveContains(searchText)
+            }
             .sorted { $0.createdAt > $1.createdAt }
+        
+        return filtered
+    }
+    
+    private var groupedRecordings: [(Date, [AudioRecording])] {
+        let grouped = Dictionary(grouping: transcribedRecordings) { recording in
+            Calendar.current.startOfDay(for: recording.createdAt)
+        }
+        return grouped.sorted { $0.key > $1.key }
     }
     
     var body: some View {
         NavigationView {
-            // Sidebar with folders
-            FolderSidebarView(folderViewModel: viewModel.folderViewModel, recorderViewModel: viewModel)
-                .environmentObject(viewModel)
-            
-            // Main content
-            Group {
+            ZStack {
+                Color(.systemGroupedBackground)
+                    .ignoresSafeArea()
+                
                 if isLoading {
                     ProgressView("Chargement des transcriptions...")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if transcribedRecordings.isEmpty {
-                    VStack(spacing: 20) {
-                        Image(systemName: "doc.text")
-                            .font(.system(size: 70))
-                            .foregroundColor(.secondary)
-                        Text("Aucune transcription")
-                            .font(.title2)
-                            .fontWeight(.medium)
-                        Text("Transcrivez vos enregistrements en cliquant sur l'icône de transcription (bulle de texte) dans la liste des enregistrements")
-                            .font(.body)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    emptyStateView
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(transcribedRecordings) { recording in
-                                TranscriptionRow(recording: recording) {
-                                    editingTranscription = recording
-                                    editedText = recording.transcription ?? ""
-                                }
-                                .contextMenu {
-                                    Button {
-                                        viewModel.startRenamingRecording(recording)
-                                    } label: {
-                                        Label("Renommer", systemImage: "pencil")
-                                    }
-                                    
-                                    Button {
-                                        viewModel.showMoveRecordingOptions(recording)
-                                    } label: {
-                                        Label("Déplacer vers...", systemImage: "folder")
-                                    }
-                                    
-                                    Button(role: .destructive) {
-                                        Task {
-                                            await viewModel.deleteRecording(recording)
-                                            await refreshTranscriptions()
+                        LazyVStack(spacing: 24) {
+                            ForEach(groupedRecordings, id: \.0) { date, recordings in
+                                Section {
+                                    VStack(spacing: 16) {
+                                        ForEach(recordings) { recording in
+                                            TranscriptionCard(
+                                                recording: recording,
+                                                onEdit: {
+                                                    editingTranscription = recording
+                                                    editedText = recording.transcription ?? ""
+                                                },
+                                                onShare: {
+                                                    if let transcription = recording.transcription {
+                                                        let activityVC = UIActivityViewController(
+                                                            activityItems: [transcription],
+                                                            applicationActivities: nil
+                                                        )
+                                                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                                                           let window = windowScene.windows.first,
+                                                           let rootVC = window.rootViewController {
+                                                            activityVC.popoverPresentationController?.sourceView = rootVC.view
+                                                            rootVC.present(activityVC, animated: true)
+                                                        }
+                                                    }
+                                                }
+                                            )
+                                            .transition(.scale.combined(with: .opacity))
                                         }
-                                    } label: {
-                                        Label("Supprimer", systemImage: "trash")
                                     }
+                                } header: {
+                                    TranscriptionDateHeader(date: date)
                                 }
                             }
                         }
                         .padding()
+                        .animation(.spring(), value: transcribedRecordings)
+                    }
+                    .refreshable {
+                        await refreshTranscriptions()
                     }
                 }
             }
-            .navigationTitle(viewModel.folderViewModel.selectedFolderId != nil ? 
-                            "Transcriptions - \(viewModel.folderViewModel.folders.first(where: { $0.id == viewModel.folderViewModel.selectedFolderId })?.name ?? "Dossier") (\(transcribedRecordings.count))" : 
-                            "Transcriptions (\(transcribedRecordings.count))")
+            .navigationTitle("Transcriptions (\(transcribedRecordings.count))")
+            .toolbar {
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    Button(action: { showSearch.toggle() }) {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    
+                    Button(action: { showFolderPicker = true }) {
+                        Image(systemName: "folder")
+                    }
+                    
+                    Button(action: {
+                        Task {
+                            await refreshTranscriptions()
+                        }
+                    }) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+            }
+            .searchable(
+                text: $searchText,
+                placement: .navigationBarDrawer,
+                prompt: "Rechercher dans les transcriptions"
+            )
             .sheet(item: $editingTranscription) { recording in
                 TranscriptionEditor(text: $editedText) {
                     Task {
@@ -182,26 +136,8 @@ struct TranscriptionsView: View {
                     }
                 }
             }
-            .toolbar {
-                Button(action: {
-                    Task {
-                        await refreshTranscriptions()
-                    }
-                }) {
-                    Image(systemName: "arrow.clockwise")
-                }
-            }
-        }
-            .sheet(isPresented: $viewModel.isRenamingRecording) {
-                RenameRecordingView(viewModel: viewModel)
-            }
-            .sheet(isPresented: $viewModel.showMoveRecordingSheet) {
-                MoveRecordingView(viewModel: viewModel)
-            }
-            .onAppear {
-                Task {
-                    await refreshTranscriptions()
-                }
+            .sheet(isPresented: $showFolderPicker) {
+                FoldersSheet(viewModel: viewModel)
             }
             .onChange(of: viewModel.folderViewModel.selectedFolderId) { _ in
                 Task {
@@ -209,6 +145,44 @@ struct TranscriptionsView: View {
                 }
             }
         }
+    }
+    
+    private var emptyStateView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "doc.text.fill")
+                .font(.system(size: 70))
+                .foregroundColor(.blue.opacity(0.8))
+                .padding()
+                .background(
+                    Circle()
+                        .fill(Color.blue.opacity(0.1))
+                        .frame(width: 120, height: 120)
+                )
+            
+            Text("Aucune transcription")
+                .font(.title2)
+                .fontWeight(.semibold)
+            
+            Text("Transcrivez vos enregistrements en cliquant sur l'icône de transcription dans la liste des enregistrements")
+                .font(.body)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+                .fixedSize(horizontal: false, vertical: true)
+            
+            Button(action: {
+                viewModel.folderViewModel.selectedFolderId = nil
+            }) {
+                Label("Voir tous les enregistrements", systemImage: "arrow.right")
+                    .padding()
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(10)
+            }
+            .buttonStyle(.plain)
+            .padding(.top)
+        }
+        .padding()
+    }
     
     private func refreshTranscriptions() async {
         isLoading = true
@@ -225,8 +199,4 @@ struct TranscriptionsView: View {
             logger.notice("Recording: \(recording.recordingID) - Has transcription: \(recording.transcription != nil)")
         }
     }
-}
-
-#Preview {
-    TranscriptionsView(viewModel: RecorderViewModel())
 }

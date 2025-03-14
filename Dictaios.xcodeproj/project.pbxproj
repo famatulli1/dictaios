@@ -29,6 +29,8 @@
 		BEFBE14B2D842ED3003C55CF /* RenameRecordingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEFBE14A2D842ED3003C55CF /* RenameRecordingView.swift */; };
 		BEFBE14D2D846752003C55CF /* FoldersSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEFBE14C2D846752003C55CF /* FoldersSheet.swift */; };
 		BEFBE14F2D8467A4003C55CF /* RoundedCorner.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEFBE14E2D8467A4003C55CF /* RoundedCorner.swift */; };
+		BEFBE1512D84762C003C55CF /* TranscriptionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEFBE1502D84762C003C55CF /* TranscriptionCard.swift */; };
+		BEFBE1532D847636003C55CF /* TranscriptionEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEFBE1522D847636003C55CF /* TranscriptionEditor.swift */; };
 		DDDDDDDDDDDDDDDDDDDDDD /* RecorderViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEEEEEEEEEEEEEEEEEEEE /* RecorderViewModel.swift */; };
 		FFFFFFFFFFFFFFFFFFFF /* RecordButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B0B0B0B0B0B0B0B0B0B0B0B /* RecordButton.swift */; };
 /* End PBXBuildFile section */
@@ -59,6 +61,8 @@
 		BEFBE14A2D842ED3003C55CF /* RenameRecordingView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = RenameRecordingView.swift; sourceTree = "<group>"; };
 		BEFBE14C2D846752003C55CF /* FoldersSheet.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FoldersSheet.swift; sourceTree = "<group>"; };
 		BEFBE14E2D8467A4003C55CF /* RoundedCorner.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = RoundedCorner.swift; sourceTree = "<group>"; };
+		BEFBE1502D84762C003C55CF /* TranscriptionCard.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TranscriptionCard.swift; sourceTree = "<group>"; };
+		BEFBE1522D847636003C55CF /* TranscriptionEditor.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TranscriptionEditor.swift; sourceTree = "<group>"; };
 		CCCCCCCCCCCCCCCCCCCCCC /* AudioFileManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioFileManager.swift; sourceTree = "<group>"; };
 		EEEEEEEEEEEEEEEEEEEEEE /* RecorderViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecorderViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -140,6 +144,8 @@
 		BFBFBFBFBFBFBFBFBFBFBFBF /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				BEFBE1522D847636003C55CF /* TranscriptionEditor.swift */,
+				BEFBE1502D84762C003C55CF /* TranscriptionCard.swift */,
 				BEFBE14E2D8467A4003C55CF /* RoundedCorner.swift */,
 				BEFBE14C2D846752003C55CF /* FoldersSheet.swift */,
 				BEFBE14A2D842ED3003C55CF /* RenameRecordingView.swift */,
@@ -236,12 +242,14 @@
 				BEFBE14D2D846752003C55CF /* FoldersSheet.swift in Sources */,
 				BEFBE14B2D842ED3003C55CF /* RenameRecordingView.swift in Sources */,
 				3A3A3A3A3A3A3A3A3A3A3A3A /* MainView.swift in Sources */,
+				BEFBE1532D847636003C55CF /* TranscriptionEditor.swift in Sources */,
 				1A1A1A1A1A1A1A1A1A1A1A1A /* DictaiosApp.swift in Sources */,
 				BEFBE13D2D802F04003C55CF /* TranscriptionManager.swift in Sources */,
 				BEFBE1472D842EBE003C55CF /* FolderSidebarView.swift in Sources */,
 				BEAD4DCD2D7F405D00D696EA /* WaveformView.swift in Sources */,
 				9A9A9A9A9A9A9A9A9A9A9A9A /* AudioRecording.swift in Sources */,
 				BEFBE1432D842E69003C55CF /* FolderManager.swift in Sources */,
+				BEFBE1512D84762C003C55CF /* TranscriptionCard.swift in Sources */,
 				BBBBBBBBBBBBBBBBBBBBBB /* AudioFileManager.swift in Sources */,
 				DDDDDDDDDDDDDDDDDDDDDD /* RecorderViewModel.swift in Sources */,
 				FFFFFFFFFFFFFFFFFFFF /* RecordButton.swift in Sources */,
@@ -385,6 +393,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Dictaios/Preview Content\"";
+				DEVELOPMENT_TEAM = 33GMRM5R7Y;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Dictaios/Info.plist;
@@ -414,6 +423,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Dictaios/Preview Content\"";
+				DEVELOPMENT_TEAM = 33GMRM5R7Y;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Dictaios/Info.plist;

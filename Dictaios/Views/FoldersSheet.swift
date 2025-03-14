@@ -7,11 +7,26 @@ struct FoldersSheet: View {
     var body: some View {
         NavigationView {
             List {
-                ForEach(viewModel.folderViewModel.folders) { folder in
-                    FolderSheetRow(folder: folder, viewModel: viewModel, dismiss: dismiss)
+                Section("Dossiers par défaut") {
+                    ForEach(viewModel.folderViewModel.folders.filter { folder in
+                        DefaultFolderType.allCases.map { $0.name }.contains(folder.name)
+                    }) { folder in
+                        FolderSheetRow(folder: folder, viewModel: viewModel, dismiss: dismiss)
+                            .listRowBackground(Color(.systemBackground))
+                    }
+                }
+                
+                Section("Dossiers personnalisés") {
+                    ForEach(viewModel.folderViewModel.folders.filter { folder in
+                        !DefaultFolderType.allCases.map { $0.name }.contains(folder.name)
+                    }) { folder in
+                        FolderSheetRow(folder: folder, viewModel: viewModel, dismiss: dismiss)
+                            .listRowBackground(Color(.systemBackground))
+                    }
                 }
             }
             .listStyle(.insetGrouped)
+            .environment(\.defaultMinListRowHeight, 50)
             .navigationTitle("Dossiers")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -58,13 +73,26 @@ private struct FolderSheetRow: View {
     @ObservedObject var viewModel: RecorderViewModel
     let dismiss: DismissAction
     
+    private var isDefaultFolder: Bool {
+        DefaultFolderType.allCases.map { $0.name }.contains(folder.name)
+    }
+    
     var body: some View {
         HStack {
             Image(systemName: isDefaultFolder ? "folder.fill" : "folder")
                 .foregroundColor(isDefaultFolder ? .blue : .primary)
+                .font(.title3)
             
-            Text(folder.name)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(folder.name)
+                    .lineLimit(1)
+                
+                if isDefaultFolder {
+                    Text("Dossier système")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
             
             Spacer()
             
@@ -97,9 +125,24 @@ private struct FolderSheetRow: View {
                 .tint(.orange)
             }
         }
+        .contextMenu {
+            if !isDefaultFolder {
+                Button(role: .destructive) {
+                    viewModel.folderViewModel.confirmDeleteFolder(folder)
+                } label: {
+                    Label("Supprimer", systemImage: "trash")
+                }
+                
+                Button {
+                    viewModel.folderViewModel.startRenamingFolder(folder)
+                } label: {
+                    Label("Renommer", systemImage: "pencil")
+                }
+            }
+        }
     }
-    
-    private var isDefaultFolder: Bool {
-        DefaultFolderType.allCases.map { $0.name }.contains(folder.name)
-    }
+}
+
+#Preview {
+    FoldersSheet(viewModel: RecorderViewModel())
 }
