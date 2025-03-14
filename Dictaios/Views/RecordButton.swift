@@ -15,34 +15,35 @@ struct RecordButton: View {
             ZStack {
                 Circle()
                     .fill(backgroundColor)
-                    .frame(width: 70, height: 70)
-                    .shadow(radius: 4)
+                    .frame(width: 100, height: 100)
+                    .shadow(radius: 5)
                 
                 if state == .recording {
                     // Square for stop recording
                     RoundedRectangle(cornerRadius: 4)
                         .fill(Color.white)
-                        .frame(width: 30, height: 30)
+                        .frame(width: 40, height: 40)
                 } else if state == .playing {
                     // Pause icon
                     HStack(spacing: 8) {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(Color.white)
-                            .frame(width: 6, height: 24)
+                            .frame(width: 8, height: 32)
                         
                         RoundedRectangle(cornerRadius: 2)
                             .fill(Color.white)
-                            .frame(width: 6, height: 24)
+                            .frame(width: 8, height: 32)
                     }
                 } else {
                     // Circle for record
                     Circle()
                         .fill(Color.white)
-                        .frame(width: 30, height: 30)
+                        .frame(width: 40, height: 40)
                 }
             }
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityLabel(accessibilityLabel)
     }
     
     private var backgroundColor: Color {
@@ -53,6 +54,17 @@ struct RecordButton: View {
             return Color.red.opacity(0.8)
         case .playing:
             return Color.blue
+        }
+    }
+    
+    private var accessibilityLabel: String {
+        switch state {
+        case .idle:
+            return "Commencer l'enregistrement"
+        case .recording:
+            return "Arrêter l'enregistrement"
+        case .playing:
+            return "Arrêter la lecture"
         }
     }
 }

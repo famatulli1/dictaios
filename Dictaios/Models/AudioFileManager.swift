@@ -21,6 +21,7 @@ extension String {
 class AudioFileManager {
     
     static let shared = AudioFileManager()
+    private let logger = Logger(subsystem: "com.dictaios", category: "AudioFileManager")
     
     private init() {}
     
@@ -37,7 +38,6 @@ class AudioFileManager {
         return getDocumentsDirectory().appendingPathComponent(fileName)
     }
     
-    private let logger = Logger(subsystem: "com.dictaios", category: "AudioFileManager")
     
     // Get all saved recordings
     func getAllRecordings() -> [AudioRecording] {
@@ -109,8 +109,24 @@ class AudioFileManager {
             try FileManager.default.removeItem(at: url)
             return true
         } catch {
-            print("Error deleting recording: \(error.localizedDescription)")
+            logger.error("Error deleting recording: \(error.localizedDescription)")
             return false
+        }
+    }
+    
+    // Rename a recording file
+    func renameRecording(at url: URL, to newName: String) -> URL? {
+        let fileExtension = url.pathExtension
+        let directory = url.deletingLastPathComponent()
+        let newURL = directory.appendingPathComponent(newName).appendingPathExtension(fileExtension)
+        
+        do {
+            try FileManager.default.moveItem(at: url, to: newURL)
+            logger.notice("Renamed recording from \(url.lastPathComponent) to \(newURL.lastPathComponent)")
+            return newURL
+        } catch {
+            logger.error("Error renaming recording: \(error.localizedDescription)")
+            return nil
         }
     }
 }

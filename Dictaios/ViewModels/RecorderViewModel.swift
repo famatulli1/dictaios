@@ -1,4 +1,3 @@
-
 import Foundation
 import AVFoundation
 import SwiftUI
@@ -22,6 +21,7 @@ class RecorderViewModel: NSObject, ObservableObject {
     
     // Published properties
     @Published var recordings: [AudioRecording] = []
+    @Published var filteredRecordings: [AudioRecording] = []
     @Published private(set) var isTranscribing = false
     @Published var recordingState: RecordingState = .idle
     @Published var currentRecordingTime: TimeInterval = 0
@@ -43,6 +43,11 @@ class RecorderViewModel: NSObject, ObservableObject {
     @Published var audioSamples: [URL: [Float]] = [:]
     @Published var isLoadingWaveform: Bool = false
     @Published private var transcribingRecordings: Set<UUID> = []
+    @Published var isRenamingRecording = false
+    @Published var recordingToRename: AudioRecording?
+    @Published var renameRecordingName = ""
+    @Published var showMoveRecordingSheet = false
+    @Published var recordingToMove: AudioRecording?
     
     // Audio components
     private var audioRecorder: AVAudioRecorder?
@@ -51,17 +56,27 @@ class RecorderViewModel: NSObject, ObservableObject {
     private var recordingStartTime: Date?
     private var progressTimer: Timer?
     
-    // File manager
+    // Managers
     private let fileManager = AudioFileManager.shared
+    private let folderManager = FolderManager.shared
+    
+    // Folder view model
+    @Published var folderViewModel: FolderViewModel!
     
     override init() {
         super.init()
         setupAudioSession()
         
+        // Create folder view model
+        self.folderViewModel = FolderViewModel()
+        
         // Initial loading of recordings and waveforms
         Task {
             await self.loadRecordings()
             await self.preloadAllWaveforms()
+            
+            // Update filtered recordings when selected folder changes
+            await self.updateFilteredRecordings()
         }
     }
     
@@ -228,6 +243,9 @@ class RecorderViewModel: NSObject, ObservableObject {
         // Update the recordings array
         self.recordings = recordingsWithTranscriptions
         
+        // Update filtered recordings based on selected folder
+        await self.updateFilteredRecordings()
+        
         // Log transcription status
         let transcribedCount = recordingsWithTranscriptions.filter { $0.transcription != nil }.count
         logger.notice("Loaded \(transcribedCount) transcriptions out of \(recordingsWithTranscriptions.count) recordings")
@@ -240,6 +258,16 @@ class RecorderViewModel: NSObject, ObservableObject {
                 Has transcription: \(recording.transcription != nil)
                 Transcription: \(recording.transcription ?? "none")
                 """)
+        }
+    }
+    
+    func updateFilteredRecordings() async {
+        if let selectedFolderId = folderViewModel.selectedFolderId {
+            // Filter recordings by selected folder
+            self.filteredRecordings = await folderViewModel.getRecordingsInSelectedFolder(allRecordings: self.recordings)
+        } else {
+            // If no folder is selected, show all recordings
+            self.filteredRecordings = self.recordings
         }
     }
     
@@ -275,16 +303,111 @@ class RecorderViewModel: NSObject, ObservableObject {
         
         if fileManager.deleteRecording(at: recording.fileURL) {
             do {
+                // Remove from transcriptions
                 try await TranscriptionManager.shared.deleteTranscription(for: recording.recordingID)
+                
+                // Remove from folders
+                await folderViewModel.removeRecordingFromAllFolders(recording)
+                
+                // Remove from recordings array
                 if let index = self.recordings.firstIndex(where: { $0.id == recording.id }) {
                     self.recordings.remove(at: index)
                 }
+                
+                // Update filtered recordings
+                await self.updateFilteredRecordings()
+                
+                self.messageType = .success
+                self.message = "Enregistrement supprimé"
             } catch {
                 logger.error("Failed to delete transcription: \(error.localizedDescription)")
                 self.messageType = .error
-                self.message = "Failed to delete transcription: \(error.localizedDescription)"
+                self.message = "Erreur lors de la suppression: \(error.localizedDescription)"
             }
         }
+    }
+    
+    func startRenamingRecording(_ recording: AudioRecording) {
+        recordingToRename = recording
+        renameRecordingName = recording.fileName.replacingOccurrences(of: ".m4a", with: "")
+            .replacingOccurrences(of: "recording_", with: "")
+        isRenamingRecording = true
+    }
+    
+    func renameRecording() async {
+        guard let recording = recordingToRename else { return }
+        guard !renameRecordingName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            messageType = .error
+            message = "Le nom de l'enregistrement ne peut pas être vide"
+            return
+        }
+        
+        // Format the new name
+        let newName = "recording_\(renameRecordingName.trimmingCharacters(in: .whitespacesAndNewlines))"
+        
+        // Rename the file
+        if let newURL = fileManager.renameRecording(at: recording.fileURL, to: newName) {
+            // Update the recording in the recordings array
+            if let index = self.recordings.firstIndex(where: { $0.id == recording.id }) {
+                // Create a new AudioRecording instance with the updated fileURL
+                let updatedRecording = AudioRecording(
+                    id: recording.id,
+                    fileURL: newURL,
+                    createdAt: recording.createdAt,
+                    duration: recording.duration,
+                    isPlaying: recording.isPlaying,
+                    transcription: recording.transcription
+                )
+                
+                // Replace the old recording with the new one
+                self.recordings[index] = updatedRecording
+                
+                // If this recording is selected, update the selected recording
+                if selectedRecording?.id == recording.id {
+                    selectedRecording = updatedRecording
+                }
+                
+                // Reset renaming state
+                isRenamingRecording = false
+                recordingToRename = nil
+                renameRecordingName = ""
+                
+                // Update filtered recordings
+                await self.updateFilteredRecordings()
+                
+                messageType = .success
+                message = "Enregistrement renommé"
+            }
+        } else {
+            messageType = .error
+            message = "Erreur lors du renommage de l'enregistrement"
+        }
+    }
+    
+    func cancelRenamingRecording() {
+        isRenamingRecording = false
+        recordingToRename = nil
+        renameRecordingName = ""
+    }
+    
+    func showMoveRecordingOptions(_ recording: AudioRecording) {
+        recordingToMove = recording
+        showMoveRecordingSheet = true
+    }
+    
+    func moveRecording(to folderId: UUID) async {
+        guard let recording = recordingToMove else { return }
+        
+        await folderViewModel.moveRecording(recording, to: folderId)
+        await updateFilteredRecordings()
+        
+        showMoveRecordingSheet = false
+        recordingToMove = nil
+    }
+    
+    func cancelMoveRecording() {
+        showMoveRecordingSheet = false
+        recordingToMove = nil
     }
     
     // MARK: - Transcription
@@ -364,7 +487,14 @@ extension RecorderViewModel: AVAudioRecorderDelegate {
             self.progressTimer?.invalidate()
             self.progressTimer = nil
             
+            // Load recordings and add the new recording to the default folder
             await self.loadRecordings()
+            
+            // Add the new recording to the default folder (Drafts)
+            if let newRecording = self.recordings.first {
+                await self.folderViewModel.addNewRecording(newRecording)
+                await self.updateFilteredRecordings()
+            }
         }
     }
 }

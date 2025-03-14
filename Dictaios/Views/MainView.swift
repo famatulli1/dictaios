@@ -44,45 +44,122 @@ struct MainView: View {
 struct RecordingsView: View {
     @ObservedObject var viewModel: RecorderViewModel
     @State private var showingSettings = false
+    @State private var showingFolders = false
     @State private var showingErrorAlert = false
+    @State private var draggedRecording: AudioRecording?
     
     var body: some View {
-        NavigationView {
-            ZStack {
-                // Background
-                Color(.systemBackground)
-                    .edgesIgnoringSafeArea(.all)
+        ZStack {
+            // Background
+            Color(.systemBackground)
+                .edgesIgnoringSafeArea(.all)
+            
+            VStack(spacing: 0) {
+                // Main recording button area
+                Spacer()
                 
+                // Record button area
+                VStack(spacing: 16) {
+                    if viewModel.recordingState == .recording {
+                        Text(formatRecordingTime(viewModel.currentRecordingTime))
+                            .font(.system(size: 32, weight: .medium, design: .monospaced))
+                            .foregroundColor(.red)
+                            .transition(.opacity)
+                    } else {
+                        Text("Appuyez pour enregistrer")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    ZStack {
+                        // Pulse animation
+                        if viewModel.recordingState == .recording {
+                            RecordButtonPulseAnimation(
+                                state: .recording
+                            )
+                            .frame(width: 160, height: 160)
+                        }
+                        
+                        // Record button
+                        RecordButton(
+                            state: buttonState,
+                            action: {
+                                switch viewModel.recordingState {
+                                case .idle:
+                                    viewModel.startRecording()
+                                case .recording:
+                                    viewModel.stopRecording()
+                                case .playing:
+                                    viewModel.stopPlayback()
+                                }
+                            }
+                        )
+                    }
+                    .frame(height: 160)
+                }
+                .padding(.vertical, 30)
+                .shadow(radius: 3)
+                
+                Spacer()
+                
+                // Recordings list
                 VStack {
-                    // Recordings list
-                    if viewModel.recordings.isEmpty {
+                    HStack {
+                        Text(viewModel.folderViewModel.selectedFolderId != nil ? 
+                             (viewModel.folderViewModel.folders.first(where: { $0.id == viewModel.folderViewModel.selectedFolderId })?.name ?? "Enregistrements") : 
+                             "Enregistrements")
+                            .font(.headline)
+                        
+                        Spacer()
+                        
+                        Button(action: {
+                            showingFolders = true
+                        }) {
+                            Image(systemName: "folder")
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    .padding(.horizontal)
+                    
+                    if viewModel.filteredRecordings.isEmpty {
                         emptyStateView
                     } else {
                         recordingsList
                     }
-                    
-                    Spacer()
-                    
-                    // Recording controls
-                    recordingControls
                 }
-                .padding()
+                .frame(maxHeight: UIScreen.main.bounds.height * 0.4)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedCorner(radius: 15, corners: [.topLeft, .topRight]))
+                .overlay(
+                    Rectangle()
+                        .fill(Color(.separator))
+                        .frame(height: 0.5)
+                        .frame(maxWidth: .infinity),
+                    alignment: .top
+                )
             }
-            .navigationTitle("Dictaios")
+            .navigationBarTitleDisplayMode(.inline)
+            .ignoresSafeArea(.all, edges: .top)
+            .sheet(isPresented: $showingFolders) {
+                FoldersSheet(viewModel: viewModel)
+            }
             .toolbar {
-                ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        showingSettings = true
-                    }) {
-                        Image(systemName: "gear")
-                    }
-                    
-                    Button(action: {
-                        Task {
-                            await viewModel.loadRecordings()
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    HStack(spacing: 15) {
+                        Button(action: {
+                            Task {
+                                await viewModel.loadRecordings()
+                                await viewModel.updateFilteredRecordings()
+                            }
+                        }) {
+                            Image(systemName: "arrow.clockwise")
                         }
-                    }) {
-                        Image(systemName: "arrow.clockwise")
+                        
+                        Button(action: {
+                            showingSettings = true
+                        }) {
+                            Image(systemName: "gear")
+                        }
                     }
                 }
             }
@@ -92,8 +169,20 @@ struct RecordingsView: View {
             .sheet(isPresented: $showingSettings) {
                 SettingsView()
             }
+            .sheet(isPresented: $viewModel.isRenamingRecording) {
+                RenameRecordingView(viewModel: viewModel)
+            }
+            .sheet(isPresented: $viewModel.showMoveRecordingSheet) {
+                MoveRecordingView(viewModel: viewModel)
+            }
             .task {
                 await viewModel.loadRecordings()
+                await viewModel.updateFilteredRecordings()
+            }
+            .onChange(of: viewModel.folderViewModel.selectedFolderId) { _ in
+                Task {
+                    await viewModel.updateFilteredRecordings()
+                }
             }
         }
     }
@@ -108,11 +197,11 @@ struct RecordingsView: View {
                 .font(.system(size: 70))
                 .foregroundColor(.secondary)
             
-            Text("No Recordings Yet")
+            Text("Aucun enregistrement")
                 .font(.title2)
                 .fontWeight(.medium)
             
-            Text("Tap the record button below to start recording your first note.")
+            Text("Appuyez sur le bouton d'enregistrement pour commencer.")
                 .font(.body)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -125,7 +214,7 @@ struct RecordingsView: View {
     private var recordingsList: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                ForEach(viewModel.recordings) { recording in
+                ForEach(viewModel.filteredRecordings) { recording in
                     PlayerView(
                         recording: recording,
                         onPlay: { viewModel.playRecording($0) },
@@ -138,22 +227,62 @@ struct RecordingsView: View {
                                 await viewModel.deleteRecording(recording)
                             }
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            Label("Supprimer", systemImage: "trash")
                         }
+                        
+                        Button {
+                            viewModel.startRenamingRecording(recording)
+                        } label: {
+                            Label("Renommer", systemImage: "pencil")
+                        }
+                        .tint(.orange)
+                        
+                        Button {
+                            viewModel.showMoveRecordingOptions(recording)
+                        } label: {
+                            Label("Déplacer", systemImage: "folder")
+                        }
+                        .tint(.blue)
                     }
                     .contextMenu {
+                        Button {
+                            viewModel.startRenamingRecording(recording)
+                        } label: {
+                            Label("Renommer", systemImage: "pencil")
+                        }
+                        
+                        Button {
+                            viewModel.showMoveRecordingOptions(recording)
+                        } label: {
+                            Label("Déplacer vers...", systemImage: "folder")
+                        }
+                        
                         Button(role: .destructive) {
                             Task {
                                 await viewModel.deleteRecording(recording)
                             }
                         } label: {
-                            Label("Delete", systemImage: "trash")
+                            Label("Supprimer", systemImage: "trash")
                         }
+                    }
+                    .onDrag {
+                        // Set the dragged recording for folder drop
+                        self.draggedRecording = recording
+                        if let sidebarView = findFolderSidebarView() {
+                            sidebarView.setDraggedRecording(recording)
+                        }
+                        return NSItemProvider(object: recording.id.uuidString as NSString)
                     }
                 }
             }
             .padding(.top)
         }
+    }
+    
+    private func findFolderSidebarView() -> FolderSidebarView? {
+        // This is a workaround to find the FolderSidebarView instance
+        // In a real app, you might use a different approach like a coordinator pattern
+        return nil
     }
     
     private var recordingControls: some View {

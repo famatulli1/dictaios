@@ -181,6 +181,32 @@ struct PlayerView: View {
                             .help(recording.transcription != nil ? "Déjà transcrit" : "Transcrire l'enregistrement")
                         }
                     }
+                    
+                    // Rename button
+                    Button(action: {
+                        viewModel.startRenamingRecording(recording)
+                    }) {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 30, height: 30)
+                            .background(Color.orange)
+                            .clipShape(Circle())
+                    }
+                    .help("Renommer l'enregistrement")
+                    
+                    // Move to folder button
+                    Button(action: {
+                        viewModel.showMoveRecordingOptions(recording)
+                    }) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 30, height: 30)
+                            .background(Color.purple)
+                            .clipShape(Circle())
+                    }
+                    .help("Déplacer vers un dossier")
                 }
             }
             .padding(.horizontal)

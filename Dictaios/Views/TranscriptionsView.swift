@@ -88,12 +88,21 @@ struct TranscriptionsView: View {
     @State private var isLoading = false
     
     private var transcribedRecordings: [AudioRecording] {
-        viewModel.recordings.filter { $0.transcription != nil }
+        // Filter by selected folder if one is selected
+        let recordings = viewModel.folderViewModel.selectedFolderId != nil ? 
+            viewModel.filteredRecordings : viewModel.recordings
+        
+        return recordings.filter { $0.transcription != nil }
             .sorted { $0.createdAt > $1.createdAt }
     }
     
     var body: some View {
         NavigationView {
+            // Sidebar with folders
+            FolderSidebarView(folderViewModel: viewModel.folderViewModel, recorderViewModel: viewModel)
+                .environmentObject(viewModel)
+            
+            // Main content
             Group {
                 if isLoading {
                     ProgressView("Chargement des transcriptions...")
@@ -120,13 +129,37 @@ struct TranscriptionsView: View {
                                     editingTranscription = recording
                                     editedText = recording.transcription ?? ""
                                 }
+                                .contextMenu {
+                                    Button {
+                                        viewModel.startRenamingRecording(recording)
+                                    } label: {
+                                        Label("Renommer", systemImage: "pencil")
+                                    }
+                                    
+                                    Button {
+                                        viewModel.showMoveRecordingOptions(recording)
+                                    } label: {
+                                        Label("Déplacer vers...", systemImage: "folder")
+                                    }
+                                    
+                                    Button(role: .destructive) {
+                                        Task {
+                                            await viewModel.deleteRecording(recording)
+                                            await refreshTranscriptions()
+                                        }
+                                    } label: {
+                                        Label("Supprimer", systemImage: "trash")
+                                    }
+                                }
                             }
                         }
                         .padding()
                     }
                 }
             }
-            .navigationTitle("Transcriptions (\(transcribedRecordings.count))")
+            .navigationTitle(viewModel.folderViewModel.selectedFolderId != nil ? 
+                            "Transcriptions - \(viewModel.folderViewModel.folders.first(where: { $0.id == viewModel.folderViewModel.selectedFolderId })?.name ?? "Dossier") (\(transcribedRecordings.count))" : 
+                            "Transcriptions (\(transcribedRecordings.count))")
             .sheet(item: $editingTranscription) { recording in
                 TranscriptionEditor(text: $editedText) {
                     Task {
@@ -159,12 +192,23 @@ struct TranscriptionsView: View {
                 }
             }
         }
-        .onAppear {
-            Task {
-                await refreshTranscriptions()
+            .sheet(isPresented: $viewModel.isRenamingRecording) {
+                RenameRecordingView(viewModel: viewModel)
+            }
+            .sheet(isPresented: $viewModel.showMoveRecordingSheet) {
+                MoveRecordingView(viewModel: viewModel)
+            }
+            .onAppear {
+                Task {
+                    await refreshTranscriptions()
+                }
+            }
+            .onChange(of: viewModel.folderViewModel.selectedFolderId) { _ in
+                Task {
+                    await viewModel.updateFilteredRecordings()
+                }
             }
         }
-    }
     
     private func refreshTranscriptions() async {
         isLoading = true
