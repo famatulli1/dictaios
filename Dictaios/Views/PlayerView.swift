@@ -79,18 +79,13 @@ struct PlayerView: View {
                                     Spacer()
                                     
                                     Button(action: {
-                                        Task {
-                                            do {
-                                                try await TranscriptionManager.shared.setTranscription(transcription, for: recording.recordingID)
-                                                viewModel.errorMessage = "Transcription sauvegardée"
-                                            } catch {
-                                                viewModel.errorMessage = "Erreur lors de la sauvegarde: \(error.localizedDescription)"
-                                            }
+                                        withAnimation {
+                                            showTranscription.toggle()
                                         }
                                     }) {
                                         HStack(spacing: 4) {
-                                            Image(systemName: "square.and.arrow.down")
-                                            Text("Sauvegarder")
+                                            Image(systemName: showTranscription ? "chevron.up" : "chevron.down")
+                                            Text(showTranscription ? "Voir moins" : "Voir plus")
                                         }
                                         .font(.caption)
                                         .foregroundColor(.blue)

@@ -5,16 +5,38 @@ struct MainView: View {
     @StateObject private var settings = AppSettings.shared
     
     var body: some View {
-        TabView {
-            RecordingsView(viewModel: viewModel)
-                .tabItem {
-                    Label("Enregistrements", systemImage: "mic")
-                }
+        ZStack {
+            TabView {
+                RecordingsView(viewModel: viewModel)
+                    .tabItem {
+                        Label("Enregistrements", systemImage: "mic")
+                    }
+                
+                TranscriptionsView(viewModel: viewModel)
+                    .tabItem {
+                        Label("Transcriptions", systemImage: "doc.text")
+                    }
+            }
             
-            TranscriptionsView(viewModel: viewModel)
-                .tabItem {
-                    Label("Transcriptions", systemImage: "doc.text")
+            // Messages overlay
+            VStack {
+                if let message = viewModel.message {
+                    HStack {
+                        Image(systemName: viewModel.messageType == .success ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                            .foregroundColor(viewModel.messageType == .success ? .green : .red)
+                        Text(message)
+                            .foregroundColor(viewModel.messageType == .success ? .green : .red)
+                    }
+                    .padding()
+                    .background(Color(.systemBackground).opacity(0.9))
+                    .cornerRadius(10)
+                    .shadow(radius: 2)
+                    .padding(.top, 44)
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                Spacer()
+            }
+            .animation(.easeInOut, value: viewModel.message != nil)
         }
     }
 }
@@ -56,24 +78,22 @@ struct RecordingsView: View {
                     }
                     
                     Button(action: {
-                        viewModel.loadRecordings()
+                        Task {
+                            await viewModel.loadRecordings()
+                        }
                     }) {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
             }
-            .alert(isPresented: $showingErrorAlert) {
-                Alert(
-                    title: Text("Error"),
-                    message: Text(viewModel.errorMessage ?? "An unknown error occurred"),
-                    dismissButton: .default(Text("OK"))
-                )
-            }
-            .onChange(of: viewModel.errorMessage) { newValue in
-                showingErrorAlert = newValue != nil
+            .alert(isPresented: .constant(false)) {
+                Alert(title: Text(""))
             }
             .sheet(isPresented: $showingSettings) {
                 SettingsView()
+            }
+            .task {
+                await viewModel.loadRecordings()
             }
         }
     }

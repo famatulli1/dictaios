@@ -1,8 +1,10 @@
 import SwiftUI
+import OSLog
 
 struct TranscriptionRow: View {
     let recording: AudioRecording
     let onEdit: () -> Void
+    @State private var showFullText = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -11,21 +13,41 @@ struct TranscriptionRow: View {
                     .foregroundColor(.blue)
                 Text(recording.fileName)
                     .font(.headline)
+                    .lineLimit(1)
+                
+                Spacer()
+                
+                Text(recording.formattedDate)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
             
             if let transcription = recording.transcription {
                 Text(transcription)
                     .font(.body)
                     .foregroundColor(.primary)
-                    .lineLimit(3)
+                    .lineLimit(showFullText ? nil : 3)
+                    .onTapGesture {
+                        withAnimation {
+                            showFullText.toggle()
+                        }
+                    }
             }
             
-            Text(recording.formattedDate)
+            if showFullText {
+                Button("Voir moins") {
+                    withAnimation {
+                        showFullText = false
+                    }
+                }
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(.blue)
+            }
         }
-        .padding(.vertical, 4)
+        .padding()
+        .background(Color(.systemGray6))
         .contentShape(Rectangle())
+        .cornerRadius(10)
         .onTapGesture(perform: onEdit)
     }
 }
@@ -59,10 +81,11 @@ struct TranscriptionEditor: View {
 }
 
 struct TranscriptionsView: View {
+    private let logger = Logger(subsystem: "com.dictaios", category: "TranscriptionsView")
     @ObservedObject var viewModel: RecorderViewModel
     @State private var editingTranscription: AudioRecording?
     @State private var editedText: String = ""
-    @State private var refreshTimer: Timer? = nil
+    @State private var isLoading = false
     
     private var transcribedRecordings: [AudioRecording] {
         viewModel.recordings.filter { $0.transcription != nil }
@@ -72,7 +95,9 @@ struct TranscriptionsView: View {
     var body: some View {
         NavigationView {
             Group {
-                if transcribedRecordings.isEmpty {
+                if isLoading {
+                    ProgressView("Chargement des transcriptions...")
+                } else if transcribedRecordings.isEmpty {
                     VStack(spacing: 20) {
                         Image(systemName: "doc.text")
                             .font(.system(size: 70))
@@ -80,20 +105,24 @@ struct TranscriptionsView: View {
                         Text("Aucune transcription")
                             .font(.title2)
                             .fontWeight(.medium)
-                        Text("Les transcriptions de vos enregistrements apparaîtront ici")
+                        Text("Transcrivez vos enregistrements en cliquant sur l'icône de transcription (bulle de texte) dans la liste des enregistrements")
                             .font(.body)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 } else {
-                    List {
-                        ForEach(transcribedRecordings) { recording in
-                            TranscriptionRow(recording: recording) {
-                                editingTranscription = recording
-                                editedText = recording.transcription ?? ""
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(transcribedRecordings) { recording in
+                                TranscriptionRow(recording: recording) {
+                                    editingTranscription = recording
+                                    editedText = recording.transcription ?? ""
+                                }
                             }
                         }
+                        .padding()
                     }
                 }
             }
@@ -104,12 +133,17 @@ struct TranscriptionsView: View {
                         do {
                             try await TranscriptionManager.shared.setTranscription(editedText, for: recording.recordingID)
                             await MainActor.run {
-                                viewModel.loadRecordings()
+                                viewModel.messageType = .success
+                                viewModel.message = "Transcription modifiée"
+                                Task {
+                                    await refreshTranscriptions()
+                                }
                             }
                         } catch {
-                            print("Failed to save transcription: \(error)")
+                            logger.error("Failed to save transcription: \(error.localizedDescription)")
                             await MainActor.run {
-                                viewModel.errorMessage = "Failed to save transcription: \(error.localizedDescription)"
+                                viewModel.messageType = .error
+                                viewModel.message = "Erreur lors de la sauvegarde: \(error.localizedDescription)"
                             }
                         }
                     }
@@ -117,26 +151,28 @@ struct TranscriptionsView: View {
             }
             .toolbar {
                 Button(action: {
-                    viewModel.loadRecordings()
+                    Task {
+                        await refreshTranscriptions()
+                    }
                 }) {
                     Image(systemName: "arrow.clockwise")
                 }
             }
         }
         .onAppear {
-            // Initial load
-            viewModel.loadRecordings()
-            
-            // Start periodic refresh
-            refreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
-                viewModel.loadRecordings()
+            Task {
+                await refreshTranscriptions()
             }
         }
-        .onDisappear {
-            // Clean up timer
-            refreshTimer?.invalidate()
-            refreshTimer = nil
-        }
+    }
+    
+    private func refreshTranscriptions() async {
+        isLoading = true
+        defer { isLoading = false }
+        
+        await viewModel.loadRecordings()
+        let count = await TranscriptionManager.shared.getTranscriptionCount()
+        logger.debug("Found \(count) transcriptions")
     }
 }
 

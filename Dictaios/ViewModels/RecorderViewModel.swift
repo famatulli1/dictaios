@@ -2,6 +2,7 @@ import Foundation
 import AVFoundation
 import SwiftUI
 import Combine
+import OSLog
 
 enum RecordingState {
     case idle
@@ -9,7 +10,14 @@ enum RecordingState {
     case playing
 }
 
+@MainActor
 class RecorderViewModel: NSObject, ObservableObject {
+    private let logger = Logger(subsystem: "com.dictaios", category: "RecorderViewModel")
+    
+    enum MessageType {
+        case success
+        case error
+    }
     
     // Published properties
     @Published var recordings: [AudioRecording] = []
@@ -18,15 +26,15 @@ class RecorderViewModel: NSObject, ObservableObject {
     @Published var currentRecordingTime: TimeInterval = 0
     @Published var selectedRecording: AudioRecording?
     @Published var playbackProgress: Double = 0
-    @Published var errorMessage: String? {
+    @Published var messageType: MessageType = .error
+    @Published var message: String? {
         didSet {
-            if errorMessage != nil {
+            if message != nil && messageType == .success {
                 // Clear success messages after 3 seconds
-                if errorMessage?.hasPrefix("Transcription sauvegardée") == true {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                        if self?.errorMessage?.hasPrefix("Transcription sauvegardée") == true {
-                            self?.errorMessage = nil
-                        }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    if self.messageType == .success {
+                        self.message = nil
                     }
                 }
             }
@@ -48,12 +56,12 @@ class RecorderViewModel: NSObject, ObservableObject {
     
     override init() {
         super.init()
-        loadRecordings()
         setupAudioSession()
         
-        // Preload waveforms for existing recordings
+        // Initial loading of recordings and waveforms
         Task {
-            await preloadAllWaveforms()
+            await self.loadRecordings()
+            await self.preloadAllWaveforms()
         }
     }
     
@@ -65,7 +73,8 @@ class RecorderViewModel: NSObject, ObservableObject {
             try session.setCategory(.playAndRecord, mode: .default)
             try session.setActive(true)
         } catch {
-            errorMessage = "Failed to set up audio session: \(error.localizedDescription)"
+            self.messageType = .error
+            self.message = "Failed to set up audio session: \(error.localizedDescription)"
         }
     }
     
@@ -74,11 +83,13 @@ class RecorderViewModel: NSObject, ObservableObject {
     func startRecording() {
         // Request microphone permission if needed
         AVAudioSession.sharedInstance().requestRecordPermission { [weak self] allowed in
-            DispatchQueue.main.async {
+            Task { @MainActor in
+                guard let self = self else { return }
                 if allowed {
-                    self?.initiateRecording()
+                    self.initiateRecording()
                 } else {
-                    self?.errorMessage = "Microphone access is required to record audio."
+                    self.messageType = .error
+                    self.message = "Microphone access is required to record audio."
                 }
             }
         }
@@ -112,7 +123,8 @@ class RecorderViewModel: NSObject, ObservableObject {
             // Start timer to update recording time
             startRecordingTimer()
         } catch {
-            errorMessage = "Failed to start recording: \(error.localizedDescription)"
+            self.messageType = .error
+            self.message = "Failed to start recording: \(error.localizedDescription)"
         }
     }
     
@@ -131,7 +143,9 @@ class RecorderViewModel: NSObject, ObservableObject {
         recordingState = .idle
         
         // Load recordings to show the new recording
-        loadRecordings()
+        Task {
+            await self.loadRecordings()
+        }
     }
     
     private func startRecordingTimer() {
@@ -161,12 +175,19 @@ class RecorderViewModel: NSObject, ObservableObject {
             selectedRecording = recording
             
             // Update the isPlaying flag for the selected recording
-            updatePlayingStatus(for: recording.id, isPlaying: true)
+            self.updatePlayingStatus(for: recording.id, isPlaying: true)
             
             // Start timer to update playback progress
             startPlaybackTimer()
         } catch {
-            errorMessage = "Failed to play recording: \(error.localizedDescription)"
+            self.messageType = .error
+            self.message = "Failed to play recording: \(error.localizedDescription)"
+        }
+    }
+    
+    private func updatePlayingStatus(for id: UUID, isPlaying: Bool) {
+        if let index = self.recordings.firstIndex(where: { $0.id == id }) {
+            self.recordings[index].isPlaying = isPlaying
         }
     }
     
@@ -187,7 +208,7 @@ class RecorderViewModel: NSObject, ObservableObject {
         
         // Update the isPlaying flag for the selected recording
         if let recording = selectedRecording {
-            updatePlayingStatus(for: recording.id, isPlaying: false)
+            self.updatePlayingStatus(for: recording.id, isPlaying: false)
         }
         
         selectedRecording = nil
@@ -203,68 +224,52 @@ class RecorderViewModel: NSObject, ObservableObject {
         }
     }
     
-    private func updatePlayingStatus(for id: UUID, isPlaying: Bool) {
-        if let index = recordings.firstIndex(where: { $0.id == id }) {
-            recordings[index].isPlaying = isPlaying
-        }
-    }
-    
     // MARK: - Recording Management
     
-    func loadRecordings() {
-        recordings = fileManager.getAllRecordings()
+    func loadRecordings() async {
+        self.recordings = fileManager.getAllRecordings()
+        logger.debug("Loading \(self.recordings.count) recordings")
         
         // Load transcriptions for recordings
-        Task {
-            for i in 0..<recordings.count {
-                let recordingID = recordings[i].recordingID
-                if let transcription = await TranscriptionManager.shared.getTranscription(for: recordingID) {
-                    await MainActor.run {
-                        recordings[i].transcription = transcription
-                    }
+        for i in 0..<self.recordings.count {
+            let recordingID = self.recordings[i].recordingID
+            if let transcription = await TranscriptionManager.shared.getTranscription(for: recordingID) {
+                if i < self.recordings.count { // Safety check
+                    self.recordings[i].transcription = transcription
                 }
             }
-            
-            // Preload waveforms for newly loaded recordings
-            await preloadAllWaveforms()
         }
+        
+        let count = await TranscriptionManager.shared.getTranscriptionCount()
+        logger.debug("Loaded \(count) transcriptions")
+        
+        // Preload waveforms for newly loaded recordings
+        await self.preloadAllWaveforms()
     }
     
     // MARK: - Waveform Functions
     
-    // Load waveform data for a specific recording
     func loadWaveformData(for recording: AudioRecording) async {
         // Skip if already loaded
-        if audioSamples[recording.fileURL] != nil {
+        if self.audioSamples[recording.fileURL] != nil {
             return
         }
         
-        // Update loading state on main thread
-        await MainActor.run {
-            isLoadingWaveform = true
-        }
+        self.isLoadingWaveform = true
         
         do {
             let samples = try await AudioAnalyzer.shared.extractSamples(from: recording.fileURL, samplesCount: 100)
-            
-            // Update on main thread
-            await MainActor.run {
-                audioSamples[recording.fileURL] = samples
-                isLoadingWaveform = false
-            }
+            self.audioSamples[recording.fileURL] = samples
+            self.isLoadingWaveform = false
         } catch {
-            print("Error loading waveform: \(error.localizedDescription)")
-            
-            await MainActor.run {
-                isLoadingWaveform = false
-            }
+            logger.error("Error loading waveform: \(error.localizedDescription)")
+            self.isLoadingWaveform = false
         }
     }
     
-    // Preload waveforms for all recordings
     func preloadAllWaveforms() async {
-        for recording in recordings {
-            await loadWaveformData(for: recording)
+        for recording in self.recordings {
+            await self.loadWaveformData(for: recording)
         }
     }
     
@@ -276,16 +281,59 @@ class RecorderViewModel: NSObject, ObservableObject {
         
         // Delete the file and transcription
         if fileManager.deleteRecording(at: recording.fileURL) {
-            // Remove transcription
-            await TranscriptionManager.shared.deleteTranscription(for: recording.recordingID)
-            
-            // Remove from the list on main thread
-            await MainActor.run {
-                if let index = recordings.firstIndex(where: { $0.id == recording.id }) {
-                    recordings.remove(at: index)
+            do {
+                try await TranscriptionManager.shared.deleteTranscription(for: recording.recordingID)
+                if let index = self.recordings.firstIndex(where: { $0.id == recording.id }) {
+                    self.recordings.remove(at: index)
                 }
+            } catch {
+                logger.error("Failed to delete transcription: \(error.localizedDescription)")
+                self.messageType = .error
+                self.message = "Failed to delete transcription: \(error.localizedDescription)"
             }
         }
+    }
+    
+    // MARK: - Transcription
+    
+    func transcribeRecording(at url: URL) {
+        guard let recording = self.recordings.first(where: { $0.fileURL == url }) else { return }
+        
+        // Vérifier d'abord si la clé API est valide
+        guard AppSettings.shared.isAPIKeyValid else {
+            self.messageType = .error
+            self.message = "Veuillez configurer une clé API OpenAI valide dans les paramètres"
+            return
+        }
+        
+        self.transcribingRecordings.insert(recording.id)
+        
+        Task {
+            do {
+                let transcription = try await VoiceRecognitionService.shared.transcribeAudio(url: url)
+                try await TranscriptionManager.shared.setTranscription(transcription, for: recording.recordingID)
+                
+                if let index = self.recordings.firstIndex(where: { $0.id == recording.id }) {
+                    self.recordings[index].transcription = transcription
+                }
+                self.transcribingRecordings.remove(recording.id)
+                self.messageType = .success
+                self.message = "Transcription terminée"
+                await self.loadRecordings()
+            } catch let error as VoiceRecognitionError {
+                self.transcribingRecordings.remove(recording.id)
+                self.messageType = .error
+                self.message = error.localizedDescription
+            } catch {
+                self.transcribingRecordings.remove(recording.id)
+                self.messageType = .error
+                self.message = "Erreur inattendue: \(error.localizedDescription)"
+            }
+        }
+    }
+    
+    func isTranscribing(_ recording: AudioRecording) -> Bool {
+        self.transcribingRecordings.contains(recording.id)
     }
 }
 
@@ -293,56 +341,17 @@ class RecorderViewModel: NSObject, ObservableObject {
 
 extension RecorderViewModel: AVAudioRecorderDelegate {
     func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-        if !flag {
-            errorMessage = "Recording failed to complete successfully."
-        }
-        
-        // Update state
-        recordingState = .idle
-        progressTimer?.invalidate()
-        progressTimer = nil
-    }
-    
-    // MARK: - Transcription
-    
-    func transcribeRecording(at url: URL) {
-        guard let recording = recordings.first(where: { $0.fileURL == url }) else { return }
-        
-        // Vérifier d'abord si la clé API est valide
-        guard AppSettings.shared.isAPIKeyValid else {
-            errorMessage = "Veuillez configurer une clé API OpenAI valide dans les paramètres"
-            return
-        }
-        
-        transcribingRecordings.insert(recording.id)
-        
-        Task {
-            do {
-                let transcription = try await VoiceRecognitionService.shared.transcribeAudio(url: url)
-                try await TranscriptionManager.shared.setTranscription(transcription, for: recording.recordingID)
-                
-                await MainActor.run {
-                    if let index = recordings.firstIndex(where: { $0.id == recording.id }) {
-                        recordings[index].transcription = transcription
-                    }
-                    transcribingRecordings.remove(recording.id)
-                }
-            } catch let error as VoiceRecognitionError {
-                await MainActor.run {
-                    transcribingRecordings.remove(recording.id)
-                    errorMessage = error.localizedDescription
-                }
-            } catch {
-                await MainActor.run {
-                    transcribingRecordings.remove(recording.id)
-                    errorMessage = "Erreur inattendue: \(error.localizedDescription)"
-                }
+        Task { @MainActor in
+            if !flag {
+                self.messageType = .error
+                self.message = "Recording failed to complete successfully."
             }
+            
+            // Update state
+            self.recordingState = .idle
+            self.progressTimer?.invalidate()
+            self.progressTimer = nil
         }
-    }
-    
-    func isTranscribing(_ recording: AudioRecording) -> Bool {
-        transcribingRecordings.contains(recording.id)
     }
 }
 
@@ -350,17 +359,19 @@ extension RecorderViewModel: AVAudioRecorderDelegate {
 
 extension RecorderViewModel: AVAudioPlayerDelegate {
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        // Update state
-        recordingState = .idle
-        playbackProgress = 0
-        
-        // Update the isPlaying flag for the selected recording
-        if let recording = selectedRecording {
-            updatePlayingStatus(for: recording.id, isPlaying: false)
+        Task { @MainActor in
+            // Update state
+            self.recordingState = .idle
+            self.playbackProgress = 0
+            
+            // Update the isPlaying flag for the selected recording
+            if let recording = self.selectedRecording {
+                self.updatePlayingStatus(for: recording.id, isPlaying: false)
+            }
+            
+            self.selectedRecording = nil
+            self.progressTimer?.invalidate()
+            self.progressTimer = nil
         }
-        
-        selectedRecording = nil
-        progressTimer?.invalidate()
-        progressTimer = nil
     }
 }
