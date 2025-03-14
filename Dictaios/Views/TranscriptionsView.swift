@@ -126,7 +126,7 @@ struct TranscriptionsView: View {
                     }
                 }
             }
-            .navigationTitle("Transcriptions")
+            .navigationTitle("Transcriptions (\(transcribedRecordings.count))")
             .sheet(item: $editingTranscription) { recording in
                 TranscriptionEditor(text: $editedText) {
                     Task {
@@ -172,7 +172,14 @@ struct TranscriptionsView: View {
         
         await viewModel.loadRecordings()
         let count = await TranscriptionManager.shared.getTranscriptionCount()
-        logger.debug("Found \(count) transcriptions")
+        let storedTranscriptions = transcribedRecordings
+        logger.notice("Found \(count) transcriptions in storage")
+        logger.notice("Found \(storedTranscriptions.count) transcribed recordings")
+        logger.notice("Total recordings: \(viewModel.recordings.count)")
+        
+        for recording in storedTranscriptions {
+            logger.notice("Recording: \(recording.recordingID) - Has transcription: \(recording.transcription != nil)")
+        }
     }
 }
 

@@ -1,5 +1,22 @@
 import Foundation
 import AVFoundation
+import OSLog
+import CryptoKit
+
+// String extension to handle subscripting
+extension String {
+    subscript (bounds: CountableRange<Int>) -> String {
+        let start = index(startIndex, offsetBy: bounds.lowerBound)
+        let end = index(startIndex, offsetBy: bounds.upperBound)
+        return String(self[start..<end])
+    }
+    
+    subscript (bounds: CountableClosedRange<Int>) -> String {
+        let start = index(startIndex, offsetBy: bounds.lowerBound)
+        let end = index(startIndex, offsetBy: bounds.upperBound)
+        return String(self[start...end])
+    }
+}
 
 class AudioFileManager {
     
@@ -19,6 +36,8 @@ class AudioFileManager {
         let fileName = "recording_\(dateFormatter.string(from: Date())).m4a"
         return getDocumentsDirectory().appendingPathComponent(fileName)
     }
+    
+    private let logger = Logger(subsystem: "com.dictaios", category: "AudioFileManager")
     
     // Get all saved recordings
     func getAllRecordings() -> [AudioRecording] {
@@ -41,19 +60,47 @@ class AudioFileManager {
                 let audioAsset = AVURLAsset(url: url)
                 let duration = TimeInterval(CMTimeGetSeconds(audioAsset.duration))
                 
-                return AudioRecording(
-                    id: UUID(),
+                // Generate a consistent UUID based on the file name
+                let fileName = url.lastPathComponent
+                let uuidString = fileName.replacingOccurrences(of: "recording_", with: "")
+                    .replacingOccurrences(of: ".m4a", with: "")
+                let id = UUID(uuidString: generateConsistentUUID(from: fileName)) ?? UUID()
+                
+                let recording = AudioRecording(
+                    id: id,
                     fileURL: url,
                     createdAt: creationDate,
                     duration: duration
                 )
+                
+                logger.debug("Created recording: \(recording.recordingID) for file: \(fileName)")
+                return recording
             }
             .sorted(by: { $0.createdAt > $1.createdAt }) // Sort by date, newest first
             
         } catch {
-            print("Error getting recordings: \(error.localizedDescription)")
+            logger.error("Error getting recordings: \(error.localizedDescription)")
             return []
         }
+    }
+    
+    // Generate a consistent UUID based on file name
+    private func generateConsistentUUID(from fileName: String) -> String {
+        // Create a deterministic UUID based on the file name using SHA256
+        let hash = SHA256.hash(data: fileName.data(using: .utf8)!)
+        let hashString = hash.compactMap { String(format: "%02x", $0) }.joined()
+        
+        // Convert the first 32 characters of the hash into a UUID format
+        let uuid = String(format: "%@-%@-%@-%@-%@",
+            hashString[0..<8],
+            hashString[8..<12],
+            hashString[12..<16],
+            hashString[16..<20],
+            hashString[20..<32]
+        )
+        
+        logger.debug("Generated UUID \(uuid) for file: \(fileName)")
+        return uuid
     }
     
     // Delete a recording

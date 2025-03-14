@@ -28,7 +28,10 @@ actor TranscriptionManager {
     private func loadTranscriptions() throws {
         logger.debug("Loading transcriptions from: \(self.transcriptionsURL)")
         
-        if !FileManager.default.fileExists(atPath: self.transcriptionsURL.path) {
+        let fileManager = FileManager.default
+        var isDirectory: ObjCBool = false
+        
+        if !fileManager.fileExists(atPath: self.transcriptionsURL.path, isDirectory: &isDirectory) {
             logger.notice("Transcriptions file not found, creating empty transcriptions")
             self.transcriptions = [:]
             try self.saveTranscriptions()
@@ -38,19 +41,27 @@ actor TranscriptionManager {
         do {
             let data = try Data(contentsOf: self.transcriptionsURL)
             self.transcriptions = try JSONDecoder().decode([String: String].self, from: data)
-            logger.info("Successfully loaded \(self.transcriptions.count) transcriptions")
+            logger.notice("Successfully loaded \(self.transcriptions.count) transcriptions: \(self.transcriptions)")
         } catch {
             logger.error("Failed to load transcriptions: \(error)")
-            throw TranscriptionError.loadError(error)
+            // Initialize with empty dictionary but don't throw
+            self.transcriptions = [:]
         }
     }
     
     private func saveTranscriptions() throws {
         logger.debug("Saving transcriptions to: \(self.transcriptionsURL)")
+        
+        // Create intermediate directories if needed
+        try FileManager.default.createDirectory(at: self.transcriptionsURL.deletingLastPathComponent(),
+                                             withIntermediateDirectories: true)
+        
         do {
-            let data = try JSONEncoder().encode(self.transcriptions)
-            try data.write(to: self.transcriptionsURL)
-            logger.info("Successfully saved \(self.transcriptions.count) transcriptions")
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .prettyPrinted
+            let data = try encoder.encode(self.transcriptions)
+            try data.write(to: self.transcriptionsURL, options: .atomic)
+            logger.notice("Successfully saved \(self.transcriptions.count) transcriptions: \(self.transcriptions)")
         } catch {
             logger.error("Failed to save transcriptions: \(error)")
             throw TranscriptionError.saveError(error)
@@ -59,16 +70,19 @@ actor TranscriptionManager {
     
     func getTranscription(for recordingID: String) -> String? {
         logger.debug("Getting transcription for recordingID: \(recordingID)")
-        return self.transcriptions[recordingID]
+        let transcription = self.transcriptions[recordingID]
+        logger.debug("Found transcription: \(String(describing: transcription))")
+        return transcription
     }
     
     func setTranscription(_ transcription: String, for recordingID: String) async throws {
-        logger.debug("Setting transcription for recordingID: \(recordingID)")
+        logger.notice("Setting transcription for recordingID: \(recordingID) - \(transcription)")
         self.transcriptions[recordingID] = transcription
         try await Task {
             try self.saveTranscriptions()
         }.value
-        logger.info("Successfully set transcription for recordingID: \(recordingID)")
+        logger.notice("Successfully set and saved transcription for recordingID: \(recordingID)")
+        logger.notice("Current transcriptions: \(self.transcriptions)")
     }
     
     func deleteTranscription(for recordingID: String) async throws {
